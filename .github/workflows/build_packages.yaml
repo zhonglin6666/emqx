@@ -6,12 +6,12 @@ concurrency:
 
 on:
   push:
-#  schedule:
-#    - cron:  '0 */6 * * *'
-#  release:
-#    types:
-#      - published
-#  workflow_dispatch:
+  schedule:
+    - cron:  '0 */6 * * *'
+  release:
+    types:
+      - published
+  workflow_dispatch:
 
 jobs:
   prepare:
