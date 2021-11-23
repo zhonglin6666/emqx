@@ -24,8 +24,8 @@
 
 %% load resource instances from *.conf files
 -export([ lookup/1
+        , get_metrics/1
         , list_all/0
-        , lookup_by_type/1
         , create_local/3
         ]).
 
@@ -66,8 +66,12 @@ hash_call(InstId, Request, Timeout) ->
 lookup(InstId) ->
     case ets:lookup(emqx_resource_instance, InstId) of
         [] -> {error, not_found};
-        [{_, Data}] -> {ok, Data#{id => InstId}}
+        [{_, Data}] ->
+            {ok, Data#{id => InstId, metrics => get_metrics(InstId)}}
     end.
+
+get_metrics(InstId) ->
+    emqx_plugin_libs_metrics:get_metrics(resource_metrics, InstId).
 
 force_lookup(InstId) ->
     {ok, Data} = lookup(InstId),
@@ -75,12 +79,12 @@ force_lookup(InstId) ->
 
 -spec list_all() -> [resource_data()].
 list_all() ->
-    [Data#{id => Id} || {Id, Data} <- ets:tab2list(emqx_resource_instance)].
+    try
+        [Data#{id => Id} || {Id, Data} <- ets:tab2list(emqx_resource_instance)]
+    catch
+        error:badarg -> []
+    end.
 
--spec lookup_by_type(module()) -> [resource_data()].
-lookup_by_type(ResourceType) ->
-    [Data || #{mod := Mod} = Data <- list_all()
-             , Mod =:= ResourceType].
 
 -spec create_local(instance_id(), resource_type(), resource_config()) ->
     {ok, resource_data()} | {error, term()}.
@@ -141,7 +145,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%------------------------------------------------------------------------------
 
 %% suppress the race condition check, as these functions are protected in gproc workers
--dialyzer({nowarn_function, [do_recreate/4, do_create/3, do_restart/1, do_stop/1, do_health_check/1]}).
+-dialyzer({nowarn_function, [do_recreate/4,
+                             do_create/3,
+                             do_restart/1,
+                             do_stop/1,
+                             do_health_check/1]}).
+
 do_recreate(InstId, ResourceType, NewConfig, Params) ->
     case lookup(InstId) of
         {ok, #{mod := ResourceType, state := ResourceState, config := OldConfig}} ->
@@ -170,9 +179,11 @@ do_create(InstId, ResourceType, Config) ->
                         #{mod => ResourceType, config => Config,
                           state => ResourceState, status => stopped}}),
                     _ = do_health_check(InstId),
+                    ok = emqx_plugin_libs_metrics:create_metrics(resource_metrics, InstId),
                     {ok, force_lookup(InstId)};
                 {error, Reason} ->
-                    logger:error("start ~ts resource ~ts failed: ~p", [ResourceType, InstId, Reason]),
+                    logger:error("start ~ts resource ~ts failed: ~p",
+                                 [ResourceType, InstId, Reason]),
                     {error, Reason}
             end
     end.
@@ -202,6 +213,7 @@ do_remove(InstId) ->
 do_remove(Mod, InstId, ResourceState) ->
     _ = emqx_resource:call_stop(InstId, Mod, ResourceState),
     ets:delete(emqx_resource_instance, InstId),
+    ok = emqx_plugin_libs_metrics:clear_metrics(resource_metrics, InstId),
     ok.
 
 do_restart(InstId) ->
@@ -209,9 +221,9 @@ do_restart(InstId) ->
         {ok, #{mod := Mod, state := ResourceState, config := Config} = Data} ->
             _ = emqx_resource:call_stop(InstId, Mod, ResourceState),
             case emqx_resource:call_start(InstId, Mod, Config) of
-                {ok, ResourceState} ->
+                {ok, NewResourceState} ->
                     ets:insert(emqx_resource_instance,
-                        {InstId, Data#{state => ResourceState, status => started}}),
+                        {InstId, Data#{state => NewResourceState, status => started}}),
                     ok;
                 {error, Reason} ->
                     ets:insert(emqx_resource_instance, {InstId, Data#{status => stopped}}),

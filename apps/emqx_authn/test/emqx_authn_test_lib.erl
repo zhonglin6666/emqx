@@ -16,23 +16,53 @@
 
 -module(emqx_authn_test_lib).
 
+-include("emqx_authn.hrl").
+
 -compile(nowarn_export_all).
 -compile(export_all).
 
+-define(DEFAULT_CHECK_AVAIL_TIMEOUT, 1000).
+
+authenticator_example(Id) ->
+    #{Id := #{value := Example}} = emqx_authn_api:authenticator_examples(),
+    Example.
+
 http_example() ->
-"""
-{
-  mechanism = \"password-based\"
-  backend = http
-  method = post
-  url = \"http://127.0.0.2:8080\"
-  headers = {\"content-type\" = \"application/json\"}
-  body = {username = \"${username}\",
-          password = \"${password}\"}
-  pool_size = 8
-  connect_timeout = 5000
-  request_timeout = 5000
-  enable_pipelining = true
-  ssl = {enable = false}
-}
-""".
+    authenticator_example('password-based:http').
+
+built_in_database_example() ->
+    authenticator_example('password-based:built-in-database').
+
+jwt_example() ->
+    authenticator_example(jwt).
+
+delete_authenticators(Path, Chain) ->
+    case emqx_authentication:list_authenticators(Chain) of
+        {error, _} -> ok;
+        {ok, Authenticators} ->
+            lists:foreach(
+                fun(#{id := ID}) ->
+                    emqx:update_config(
+                        Path,
+                        {delete_authenticator, Chain, ID},
+                        #{rawconf_with_defaults => true})
+                end,
+                Authenticators)
+    end.
+
+delete_config(ID) ->
+    {ok, _} =
+        emqx:update_config(
+            [authentication],
+            {delete_authenticator, ?GLOBAL, ID},
+            #{rawconf_with_defaults => false}).
+
+is_tcp_server_available(Host, Port) ->
+    case gen_tcp:connect(Host, Port, [], ?DEFAULT_CHECK_AVAIL_TIMEOUT) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.
+

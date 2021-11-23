@@ -17,7 +17,6 @@
 
 -include("emqx_connector.hrl").
 -include_lib("typerefl/include/types.hrl").
--include_lib("emqx_resource/include/emqx_resource_behaviour.hrl").
 -include_lib("emqx/include/logger.hrl").
 
 -type server() :: tuple().
@@ -29,6 +28,8 @@
 -export([to_server/1]).
 
 -export([roots/0, fields/1]).
+
+-behaviour(emqx_resource).
 
 %% callbacks of behaviour emqx_resource
 -export([ on_start/2
@@ -100,7 +101,8 @@ on_start(InstId, #{redis_type := Type,
     Options = case maps:get(enable, SSL) of
                   true ->
                       [{ssl, true},
-                       {ssl_options, emqx_plugin_libs_ssl:save_files_return_opts(SSL, "connectors", InstId)}
+                       {ssl_options,
+                        emqx_plugin_libs_ssl:save_files_return_opts(SSL, "connectors", InstId)}
                       ];
                   false -> [{ssl, false}]
               end ++ [{sentinel, maps:get(sentinel, Config, undefined)}],

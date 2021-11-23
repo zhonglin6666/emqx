@@ -16,6 +16,8 @@
 
 -module(emqx_authn_utils).
 
+-include_lib("emqx/include/emqx_placeholder.hrl").
+
 -export([ replace_placeholders/2
         , replace_placeholder/2
         , check_password/3
@@ -23,7 +25,12 @@
         , hash/4
         , gen_salt/0
         , bin/1
+        , ensure_apps_started/1
+        , cleanup_resources/0
+        , make_resource_id/1
         ]).
+
+-define(RESOURCE_GROUP, <<"emqx_authn">>).
 
 %%------------------------------------------------------------------------------
 %% APIs
@@ -42,17 +49,17 @@ replace_placeholders([Placeholder | More], Credential, Acc) ->
             replace_placeholders(More, Credential, [convert_to_sql_param(V) | Acc])
     end.
 
-replace_placeholder(<<"${mqtt-username}">>, Credential) ->
+replace_placeholder(?PH_USERNAME, Credential) ->
     maps:get(username, Credential, undefined);
-replace_placeholder(<<"${mqtt-clientid}">>, Credential) ->
+replace_placeholder(?PH_CLIENTID, Credential) ->
     maps:get(clientid, Credential, undefined);
-replace_placeholder(<<"${mqtt-password}">>, Credential) ->
+replace_placeholder(?PH_PASSWORD, Credential) ->
     maps:get(password, Credential, undefined);
-replace_placeholder(<<"${ip-address}">>, Credential) ->
+replace_placeholder(?PH_PEERHOST, Credential) ->
     maps:get(peerhost, Credential, undefined);
-replace_placeholder(<<"${cert-subject}">>, Credential) ->
+replace_placeholder(?PH_CERT_SUBJECT, Credential) ->
     maps:get(dn, Credential, undefined);
-replace_placeholder(<<"${cert-common-name}">>, Credential) ->
+replace_placeholder(?PH_CERT_CN_NAME, Credential) ->
     maps:get(cn, Credential, undefined);
 replace_placeholder(Constant, _) ->
     Constant.
@@ -62,22 +69,42 @@ check_password(undefined, _Selected, _State) ->
 check_password(Password,
                #{<<"password_hash">> := Hash},
                #{password_hash_algorithm := bcrypt}) ->
-    case {ok, Hash} =:= bcrypt:hashpw(Password, Hash) of
-        true -> ok;
-        false -> {error, bad_username_or_password}
+    case emqx_passwd:hash(bcrypt, {Hash, Password}) of
+        Hash -> ok;
+        _ ->
+            {error, bad_username_or_password}
     end;
 check_password(Password,
                #{<<"password_hash">> := Hash} = Selected,
                #{password_hash_algorithm := Algorithm,
                  salt_position := SaltPosition}) ->
     Salt = maps:get(<<"salt">>, Selected, <<>>),
-    case Hash =:= hash(Algorithm, Password, Salt, SaltPosition) of
-        true -> ok;
-        false -> {error, bad_username_or_password}
+    case hash(Algorithm, Password, Salt, SaltPosition) of
+        Hash -> ok;
+        _ ->
+            {error, bad_username_or_password}
     end.
 
-is_superuser(Selected) ->
-    #{is_superuser => maps:get(<<"is_superuser">>, Selected, false)}.
+is_superuser(#{<<"is_superuser">> := <<"">>}) ->
+    #{is_superuser => false};
+is_superuser(#{<<"is_superuser">> := <<"0">>}) ->
+    #{is_superuser => false};
+is_superuser(#{<<"is_superuser">> := 0}) ->
+    #{is_superuser => false};
+is_superuser(#{<<"is_superuser">> := null}) ->
+    #{is_superuser => false};
+is_superuser(#{<<"is_superuser">> := false}) ->
+    #{is_superuser => false};
+is_superuser(#{<<"is_superuser">> := _}) ->
+    #{is_superuser => true};
+is_superuser(#{}) ->
+    #{is_superuser => false}.
+
+ensure_apps_started(bcrypt) ->
+    {ok, _} = application:ensure_all_started(bcrypt),
+    ok;
+ensure_apps_started(_) ->
+    ok.
 
 hash(Algorithm, Password, Salt, prefix) ->
     emqx_passwd:hash(Algorithm, <<Salt/binary, Password/binary>>);
@@ -91,6 +118,15 @@ gen_salt() ->
 bin(A) when is_atom(A) -> atom_to_binary(A, utf8);
 bin(L) when is_list(L) -> list_to_binary(L);
 bin(X) -> X.
+
+cleanup_resources() ->
+    lists:foreach(
+      fun emqx_resource:remove_local/1,
+      emqx_resource:list_group_instances(?RESOURCE_GROUP)).
+
+make_resource_id(Name) ->
+    NameBin = bin(Name),
+    emqx_resource:generate_id(?RESOURCE_GROUP, NameBin).
 
 %%------------------------------------------------------------------------------
 %% Internal functions

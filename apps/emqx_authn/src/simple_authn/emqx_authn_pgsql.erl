@@ -30,11 +30,16 @@
         ]).
 
 -export([ refs/0
-        , create/1
+        , create/2
         , update/2
         , authenticate/2
         , destroy/1
         ]).
+
+-ifdef(TEST).
+-compile(export_all).
+-compile(nowarn_export_all).
+-endif.
 
 %%------------------------------------------------------------------------------
 %% Hocon Schema
@@ -48,7 +53,7 @@ fields(config) ->
     [ {mechanism,               {enum, ['password-based']}}
     , {backend,                 {enum, [postgresql]}}
     , {password_hash_algorithm, fun password_hash_algorithm/1}
-    , {salt_position,           {enum, [prefix, suffix]}}
+    , {salt_position,           fun salt_position/1}
     , {query,                   fun query/1}
     ] ++ emqx_authn_schema:common_fields()
     ++ emqx_connector_schema_lib:relational_db_fields()
@@ -57,6 +62,10 @@ fields(config) ->
 password_hash_algorithm(type) -> {enum, [plain, md5, sha, sha256, sha512, bcrypt]};
 password_hash_algorithm(default) -> sha256;
 password_hash_algorithm(_) -> undefined.
+
+salt_position(type) -> {enum, [prefix, suffix]};
+salt_position(default) -> prefix;
+salt_position(_) -> undefined.
 
 query(type) -> string();
 query(_) -> undefined.
@@ -68,18 +77,20 @@ query(_) -> undefined.
 refs() ->
     [hoconsc:ref(?MODULE, config)].
 
-create(#{ query := Query0
-        , password_hash_algorithm := Algorithm
-        , salt_position := SaltPosition
-        , '_unique' := Unique
-        } = Config) ->
+create(_AuthenticatorID, Config) ->
+    create(Config).
+
+create(#{query := Query0,
+         password_hash_algorithm := Algorithm,
+         salt_position := SaltPosition} = Config) ->
     {Query, PlaceHolders} = parse_query(Query0),
+    ResourceId = emqx_authn_utils:make_resource_id(?MODULE),
     State = #{query => Query,
               placeholders => PlaceHolders,
               password_hash_algorithm => Algorithm,
               salt_position => SaltPosition,
-              '_unique' => Unique},
-    case emqx_resource:create_local(Unique, emqx_connector_pgsql, Config) of
+              resource_id => ResourceId},
+    case emqx_resource:create_local(ResourceId, emqx_connector_pgsql, Config) of
         {ok, already_created} ->
             {ok, State};
         {ok, _} ->
@@ -102,14 +113,13 @@ authenticate(#{auth_method := _}, _) ->
 authenticate(#{password := Password} = Credential,
              #{query := Query,
                placeholders := PlaceHolders,
-               '_unique' := Unique} = State) ->
+               resource_id := ResourceId} = State) ->
     Params = emqx_authn_utils:replace_placeholders(PlaceHolders, Credential),
-    case emqx_resource:query(Unique, {sql, Query, Params}) of
+    case emqx_resource:query(ResourceId, {sql, Query, Params}) of
         {ok, _Columns, []} -> ignore;
-        {ok, Columns, Rows} ->
+        {ok, Columns, [Row | _]} ->
             NColumns = [Name || #column{name = Name} <- Columns],
-            NRows = [erlang:element(1, Row) || Row <- Rows],
-            Selected = maps:from_list(lists:zip(NColumns, NRows)),
+            Selected = maps:from_list(lists:zip(NColumns, erlang:tuple_to_list(Row))),
             case emqx_authn_utils:check_password(Password, Selected, State) of
                 ok ->
                     {ok, emqx_authn_utils:is_superuser(Selected)};
@@ -118,13 +128,13 @@ authenticate(#{password := Password} = Credential,
             end;
         {error, Reason} ->
             ?SLOG(error, #{msg => "postgresql_query_failed",
-                           resource => Unique,
+                           resource => ResourceId,
                            reason => Reason}),
             ignore
     end.
 
-destroy(#{'_unique' := Unique}) ->
-    _ = emqx_resource:remove_local(Unique),
+destroy(#{resource_id := ResourceId}) ->
+    _ = emqx_resource:remove_local(ResourceId),
     ok.
 
 %%------------------------------------------------------------------------------
@@ -138,7 +148,7 @@ parse_query(Query) ->
             PlaceHolders = [PlaceHolder || [PlaceHolder] <- Captured],
             Replacements = ["$" ++ integer_to_list(I) || I <- lists:seq(1, length(Captured))],
             NQuery = lists:foldl(fun({PlaceHolder, Replacement}, Query0) ->
-                                     re:replace(Query0, PlaceHolder, Replacement, [{return, binary}])
+                                     re:replace(Query0, "\\" ++ PlaceHolder, Replacement, [{return, binary}])
                                  end, Query, lists:zip(PlaceHolders, Replacements)),
             {NQuery, PlaceHolders};
         nomatch ->

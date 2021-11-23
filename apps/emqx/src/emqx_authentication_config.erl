@@ -19,8 +19,8 @@
 
 -behaviour(emqx_config_handler).
 
--export([ pre_config_update/2
-        , post_config_update/4
+-export([ pre_config_update/3
+        , post_config_update/5
         ]).
 
 -export([ authenticator_id/1
@@ -53,9 +53,9 @@
 %% Callbacks of config handler
 %%------------------------------------------------------------------------------
 
--spec pre_config_update(update_request(), emqx_config:raw_config())
+-spec pre_config_update(list(atom()), update_request(), emqx_config:raw_config())
     -> {ok, map() | list()} | {error, term()}.
-pre_config_update(UpdateReq, OldConfig) ->
+pre_config_update(_, UpdateReq, OldConfig) ->
     try do_pre_config_update(UpdateReq, to_list(OldConfig)) of
         {error, Reason} -> {error, Reason};
         {ok, NewConfig} -> {ok, return_map(NewConfig)}
@@ -102,33 +102,33 @@ do_pre_config_update({move_authenticator, _ChainName, AuthenticatorID, Position}
             end
     end.
 
--spec post_config_update(update_request(), map() | list(), emqx_config:raw_config(), emqx_config:app_envs())
+-spec post_config_update(list(atom()), update_request(), map() | list(), emqx_config:raw_config(), emqx_config:app_envs())
     -> ok | {ok, map()} | {error, term()}.
-post_config_update(UpdateReq, NewConfig, OldConfig, AppEnvs) ->
+post_config_update(_, UpdateReq, NewConfig, OldConfig, AppEnvs) ->
     do_post_config_update(UpdateReq, check_configs(to_list(NewConfig)), OldConfig, AppEnvs).
 
-do_post_config_update({create_authenticator, ChainName, Config}, _NewConfig, _OldConfig, _AppEnvs) ->
-    NConfig = check_config(Config),
+do_post_config_update({create_authenticator, ChainName, Config}, NewConfig, _OldConfig, _AppEnvs) ->
+    NConfig = get_authenticator_config(authenticator_id(Config), NewConfig),
     _ = emqx_authentication:create_chain(ChainName),
     emqx_authentication:create_authenticator(ChainName, NConfig);
 do_post_config_update({delete_authenticator, ChainName, AuthenticatorID}, _NewConfig, OldConfig, _AppEnvs) ->
     case emqx_authentication:delete_authenticator(ChainName, AuthenticatorID) of
         ok ->
-            [Config] = [Config0 || Config0 <- to_list(OldConfig), AuthenticatorID == authenticator_id(Config0)],
+            Config = get_authenticator_config(AuthenticatorID, to_list(OldConfig)),
             CertsDir = certs_dir(ChainName, AuthenticatorID),
             ok = clear_certs(CertsDir, Config);
         {error, Reason} ->
             {error, Reason}
     end;
-do_post_config_update({update_authenticator, ChainName, AuthenticatorID, Config}, _NewConfig, _OldConfig, _AppEnvs) ->
-    NConfig = check_config(Config),
-    emqx_authentication:update_authenticator(ChainName, AuthenticatorID, NConfig);
+do_post_config_update({update_authenticator, ChainName, AuthenticatorID, Config}, NewConfig, _OldConfig, _AppEnvs) ->
+    case get_authenticator_config(authenticator_id(Config), NewConfig) of
+        {error, not_found} ->
+            {error, {not_found, {authenticator, AuthenticatorID}}};
+        NConfig ->
+            emqx_authentication:update_authenticator(ChainName, AuthenticatorID, NConfig)
+    end;
 do_post_config_update({move_authenticator, ChainName, AuthenticatorID, Position}, _NewConfig, _OldConfig, _AppEnvs) ->
     emqx_authentication:move_authenticator(ChainName, AuthenticatorID, Position).
-
-check_config(Config) ->
-    [Checked] = check_configs([Config]),
-    Checked.
 
 check_configs(Configs) ->
     Providers = emqx_authentication:get_providers(),
@@ -208,6 +208,12 @@ clear_certs(CertsDir, Config) ->
     OldSSL = maps:get(<<"ssl">>, Config, undefined),
     ok = emqx_tls_lib:delete_ssl_files(CertsDir, undefined, OldSSL).
 
+get_authenticator_config(AuthenticatorID, AuthenticatorsConfig) ->
+    case [C0 || C0 <- AuthenticatorsConfig, AuthenticatorID == authenticator_id(C0)] of
+        [C | _] -> C;
+        [] -> {error, not_found}
+    end.
+
 split_by_id(ID, AuthenticatorsConfig) ->
     case lists:foldl(
              fun(C, {P1, P2, F0}) ->
@@ -268,4 +274,3 @@ dir(ChainName, ID) when is_binary(ID) ->
     binary:replace(iolist_to_binary([to_bin(ChainName), "-", ID]), <<":">>, <<"-">>);
 dir(ChainName, Config) when is_map(Config) ->
     dir(ChainName, authenticator_id(Config)).
-

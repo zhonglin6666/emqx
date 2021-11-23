@@ -28,6 +28,10 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(CONF_DEFAULT, <<"
+gateway {}
+">>).
+
 %%--------------------------------------------------------------------
 %% Setup
 %%--------------------------------------------------------------------
@@ -35,18 +39,12 @@
 all() -> emqx_common_test_helpers:all(?MODULE).
 
 init_per_suite(Conf) ->
-    %% FIXME: Magic line. for saving gateway schema name for emqx_config
-    emqx_config:init_load(emqx_gateway_schema, <<"gateway {}">>),
-    emqx_mgmt_api_test_util:init_suite([emqx_gateway]),
-    %% Start emqx-authn separately, due to emqx_authn_schema
-    %% not implementing the roots/0 method, it cannot be started with
-    %% emqx-ct-helpers at the moment.
-    {ok, _} = application:ensure_all_started(emqx_authn),
+    emqx_config:init_load(emqx_gateway_schema, ?CONF_DEFAULT),
+    emqx_mgmt_api_test_util:init_suite([emqx_conf, emqx_authn, emqx_gateway]),
     Conf.
 
 end_per_suite(Conf) ->
-    application:stop(emqx_authn),
-    emqx_mgmt_api_test_util:end_suite([emqx_gateway]),
+    emqx_mgmt_api_test_util:end_suite([emqx_gateway, emqx_authn, emqx_conf]),
     Conf.
 
 %%--------------------------------------------------------------------
@@ -209,6 +207,50 @@ t_authn(_) ->
     {204, _} = request(get, "/gateway/stomp/authentication"),
     {204, _} = request(delete, "/gateway/stomp").
 
+t_authn_data_mgmt(_) ->
+    GwConf = #{name => <<"stomp">>},
+    {204, _} = request(post, "/gateway", GwConf),
+    {204, _} = request(get, "/gateway/stomp/authentication"),
+
+    AuthConf = #{mechanism => <<"password-based">>,
+                 backend => <<"built-in-database">>,
+                 user_id_type => <<"clientid">>
+                },
+    {204, _} = request(post, "/gateway/stomp/authentication", AuthConf),
+    {200, ConfResp} = request(get, "/gateway/stomp/authentication"),
+    assert_confs(AuthConf, ConfResp),
+
+    User1 = #{ user_id => <<"test">>
+             , password => <<"123456">>
+             , is_superuser => false
+             },
+    {201, _} = request(post, "/gateway/stomp/authentication/users", User1),
+    {200, #{data := [UserRespd1]}} = request(get, "/gateway/stomp/authentication/users"),
+    assert_confs(UserRespd1, User1),
+
+    {200, UserRespd2} = request(get,
+                                "/gateway/stomp/authentication/users/test"),
+    assert_confs(UserRespd2, User1),
+
+    {200, UserRespd3} = request(put,
+                                "/gateway/stomp/authentication/users/test",
+                                #{password => <<"654321">>,
+                                  is_superuser => true}),
+    assert_confs(UserRespd3, User1#{is_superuser => true}),
+
+    {200, UserRespd4} = request(get,
+                                "/gateway/stomp/authentication/users/test"),
+    assert_confs(UserRespd4, User1#{is_superuser => true}),
+
+    {204, _} = request(delete, "/gateway/stomp/authentication/users/test"),
+
+    {200, #{data := []}} = request(get,
+                                   "/gateway/stomp/authentication/users"),
+
+    {204, _} = request(delete, "/gateway/stomp/authentication"),
+    {204, _} = request(get, "/gateway/stomp/authentication"),
+    {204, _} = request(delete, "/gateway/stomp").
+
 t_listeners(_) ->
     GwConf = #{name => <<"stomp">>},
     {204, _} = request(post, "/gateway", GwConf),
@@ -262,6 +304,65 @@ t_listeners_authn(_) ->
 
     {200, ConfResp3} = request(get, Path),
     assert_confs(AuthConf2, ConfResp3),
+    {204, _} = request(delete, "/gateway/stomp").
+
+t_listeners_authn_data_mgmt(_) ->
+    GwConf = #{name => <<"stomp">>,
+               listeners => [
+                 #{name => <<"def">>,
+                   type => <<"tcp">>,
+                   bind => <<"61613">>
+                  }]},
+    {204, _} = request(post, "/gateway", GwConf),
+    {200, ConfResp} = request(get, "/gateway/stomp"),
+    assert_confs(GwConf, ConfResp),
+
+    AuthConf = #{mechanism => <<"password-based">>,
+                 backend => <<"built-in-database">>,
+                 user_id_type => <<"clientid">>
+                },
+    Path = "/gateway/stomp/listeners/stomp:tcp:def/authentication",
+    {204, _} = request(post, Path, AuthConf),
+    {200, ConfResp2} = request(get, Path),
+    assert_confs(AuthConf, ConfResp2),
+
+    User1 = #{ user_id => <<"test">>
+             , password => <<"123456">>
+             , is_superuser => false
+             },
+    {201, _} = request(post,
+                       "/gateway/stomp/listeners/stomp:tcp:def/authentication/users",
+                       User1),
+
+    {200,
+     #{data := [UserRespd1]} } = request(
+                                   get,
+                                   "/gateway/stomp/listeners/stomp:tcp:def/authentication/users"),
+    assert_confs(UserRespd1, User1),
+
+    {200, UserRespd2} = request(
+                          get,
+                          "/gateway/stomp/listeners/stomp:tcp:def/authentication/users/test"),
+    assert_confs(UserRespd2, User1),
+
+    {200, UserRespd3} = request(
+                          put,
+                          "/gateway/stomp/listeners/stomp:tcp:def/authentication/users/test",
+                          #{password => <<"654321">>, is_superuser => true}),
+    assert_confs(UserRespd3, User1#{is_superuser => true}),
+
+    {200, UserRespd4} = request(
+                          get,
+                          "/gateway/stomp/listeners/stomp:tcp:def/authentication/users/test"),
+    assert_confs(UserRespd4, User1#{is_superuser => true}),
+
+    {204, _} = request(
+                 delete,
+                 "/gateway/stomp/listeners/stomp:tcp:def/authentication/users/test"),
+
+    {200, #{data := []}} = request(
+                             get,
+                             "/gateway/stomp/listeners/stomp:tcp:def/authentication/users"),
     {204, _} = request(delete, "/gateway/stomp").
 
 %%--------------------------------------------------------------------
