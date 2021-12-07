@@ -182,12 +182,12 @@ check_parameter([{Name, Type} | Spec], Bindings, QueryStr, Module, BindingsAcc, 
     Schema = ?INIT_SCHEMA#{roots => [{Name, Type}]},
     case hocon_schema:field_schema(Type, in) of
         path ->
-            Option = #{atom_key => true, override_env => false},
+            Option = #{atom_key => true},
             NewBindings = hocon_schema:check_plain(Schema, Bindings, Option),
             NewBindingsAcc = maps:merge(BindingsAcc, NewBindings),
             check_parameter(Spec, Bindings, QueryStr, Module, NewBindingsAcc, QueryStrAcc);
         query ->
-            Option = #{override_env => false},
+            Option = #{},
             NewQueryStr = hocon_schema:check_plain(Schema, QueryStr, Option),
             NewQueryStrAcc = maps:merge(QueryStrAcc, NewQueryStr),
             check_parameter(Spec, Bindings, QueryStr, Module,BindingsAcc, NewQueryStrAcc)
@@ -201,7 +201,7 @@ check_request_body(#{body := Body}, Schema, Module, CheckFun, true) ->
             _ -> Type0
         end,
     NewSchema = ?INIT_SCHEMA#{roots => [{root, Type}]},
-    Option = #{override_env => false, nullable => true},
+    Option = #{nullable => true},
     #{<<"root">> := NewBody} = CheckFun(NewSchema, #{<<"root">> => Body}, Option),
     NewBody;
 %% TODO not support nest object check yet, please use ref!
@@ -214,7 +214,7 @@ check_request_body(#{body := Body}, Schema, Module, CheckFun, true) ->
 check_request_body(#{body := Body}, Spec, _Module, CheckFun, false) ->
     lists:foldl(fun({Name, Type}, Acc) ->
         Schema = ?INIT_SCHEMA#{roots => [{Name, Type}]},
-        maps:merge(Acc, CheckFun(Schema, Body, #{override_env => false}))
+        maps:merge(Acc, CheckFun(Schema, Body, #{}))
                 end, #{}, Spec).
 
 %% tags, description, summary, security, deprecated
@@ -337,18 +337,27 @@ components(Refs) ->
 components([], SpecAcc, []) -> SpecAcc;
 components([], SpecAcc, SubRefAcc) -> components(SubRefAcc, SpecAcc, []);
 components([{Module, Field} | Refs], SpecAcc, SubRefsAcc) ->
-    Props = apply(Module, fields, [Field]),
+    Props = hocon_schema_fields(Module, Field),
     Namespace = namespace(Module),
     {Object, SubRefs} = parse_object(Props, Module),
     NewSpecAcc = SpecAcc#{?TO_REF(Namespace, Field) => Object},
     components(Refs, NewSpecAcc, SubRefs ++ SubRefsAcc);
 %% parameters in ref only have one value, not array
 components([{Module, Field, parameter} | Refs], SpecAcc, SubRefsAcc) ->
-    Props = apply(Module, fields, [Field]),
+    Props = hocon_schema_fields(Module, Field),
     {[Param], SubRefs} = parameters(Props, Module),
     Namespace = namespace(Module),
     NewSpecAcc = SpecAcc#{?TO_REF(Namespace, Field) => Param},
     components(Refs, NewSpecAcc, SubRefs ++ SubRefsAcc).
+
+hocon_schema_fields(Module, StructName) ->
+    case apply(Module, fields, [StructName]) of
+        #{fields := Fields, desc := _} ->
+            %% evil here, as it's match hocon_schema's internal representation
+            Fields; %% TODO: make use of desc ?
+        Other ->
+            Other
+    end.
 
 %% Semantic error at components.schemas.xxx:xx:xx
 %% Component names can only contain the characters A-Z a-z 0-9 - . _

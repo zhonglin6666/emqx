@@ -42,8 +42,8 @@
 namespace() -> "authn-mongodb".
 
 roots() ->
-    [ {config, hoconsc:mk(hoconsc:union(refs()),
-                          #{})}
+    [ {?CONF_NS, hoconsc:mk(hoconsc:union(refs()),
+                            #{})}
     ].
 
 fields(standalone) ->
@@ -56,8 +56,8 @@ fields('sharded-cluster') ->
     common_fields() ++ emqx_connector_mongo:fields(sharded).
 
 common_fields() ->
-    [ {mechanism,               {enum, ['password-based']}}
-    , {backend,                 {enum, [mongodb]}}
+    [ {mechanism, emqx_authn_schema:mechanism('password-based')}
+    , {backend, emqx_authn_schema:backend(mongodb)}
     , {collection,              fun collection/1}
     , {selector,                fun selector/1}
     , {password_hash_field,     fun password_hash_field/1}
@@ -115,6 +115,8 @@ create(#{selector := Selector} = Config) ->
                password_hash_algorithm,
                salt_position],
               Config),
+    #{password_hash_algorithm := Algorithm} = State,
+    ok = emqx_authn_utils:ensure_apps_started(Algorithm),
     ResourceId = emqx_authn_utils:make_resource_id(?MODULE),
     NState = State#{
                selector => NSelector,
@@ -155,7 +157,7 @@ authenticate(#{password := Password} = Credential,
         Doc ->
             case check_password(Password, Doc, State) of
                 ok ->
-                    {ok, #{is_superuser => is_superuser(Doc, State)}};
+                    {ok, is_superuser(Doc, State)};
                 {error, {cannot_find_password_hash_field, PasswordHashField}} ->
                     ?SLOG(error, #{msg => "cannot_find_password_hash_field",
                                    resource => ResourceId,
@@ -234,9 +236,10 @@ check_password(Password,
     end.
 
 is_superuser(Doc, #{is_superuser_field := IsSuperuserField}) ->
-    maps:get(IsSuperuserField, Doc, false);
+    IsSuperuser = maps:get(IsSuperuserField, Doc, false),
+    emqx_authn_utils:is_superuser(#{<<"is_superuser">> => IsSuperuser});
 is_superuser(_, _) ->
-    false.
+    emqx_authn_utils:is_superuser(#{<<"is_superuser">> => false}).
 
 hash(Algorithm, Password, Salt, prefix) ->
     emqx_passwd:hash(Algorithm, <<Salt/binary, Password/binary>>);

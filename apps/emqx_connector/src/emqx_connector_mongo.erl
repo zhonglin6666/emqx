@@ -118,7 +118,7 @@ on_start(InstId, Config = #{mongo_type := Type,
                   false -> [{ssl, false}]
               end,
     Topology = maps:get(topology, NConfig, #{}),
-    Opts = [{type, init_type(NConfig)},
+    Opts = [{mongo_type, init_type(NConfig)},
             {hosts, Hosts},
             {pool_size, PoolSize},
             {options, init_topology_options(maps:to_list(Topology), [])},
@@ -186,6 +186,7 @@ connect(Opts) ->
     Options = proplists:get_value(options, Opts, []),
     WorkerOptions = proplists:get_value(worker_options, Opts, []),
     mongo_api:connect(Type, Hosts, Options, WorkerOptions).
+
 
 mongo_query(Conn, find, Collection, Selector, Projector) ->
     mongo_api:find(Conn, Collection, Selector, Projector);
@@ -268,7 +269,7 @@ srv_record(_) -> undefined.
 parse_servers(Type, Servers) when is_binary(Servers) ->
     parse_servers(Type, binary_to_list(Servers));
 parse_servers(Type, Servers) when is_list(Servers) ->
-    case string:split(Servers, ",", trailing) of
+    case string:split(Servers, ",", all) of
         [Host | _] when Type =:= single ->
             [Host];
         Hosts ->
