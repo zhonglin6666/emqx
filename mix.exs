@@ -4,6 +4,7 @@ defmodule EMQXUmbrella.MixProject do
   def project do
     [
       apps_path: "apps",
+      app: :emqx,
       version: pkg_vsn(),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -36,9 +37,10 @@ defmodule EMQXUmbrella.MixProject do
       {:gen_rpc, github: "emqx/gen_rpc", tag: "2.5.1", override: true},
       {:gen_coap, github: "emqx/gen_coap", tag: "v0.3.2", override: true},
       {:snabbkaffe, github: "kafka4beam/snabbkaffe", tag: "0.14.0", override: true},
-      {:emqx_http_lib, github: "emqx/emqx_http_lib", tag: "0.4.0", override: true}
-      | (enable_bcrypt() && [{:bcrypt, github: "emqx/erlang-bcrypt", tag: "0.6.0"}]) || []
-    ]
+      {:emqx_http_lib, github: "emqx/emqx_http_lib", tag: "0.4.0", override: true},
+      ####
+      {:emqx, path: "apps/emqx"},
+    ] ++ ((enable_bcrypt() && [{:bcrypt, github: "emqx/erlang-bcrypt", tag: "0.6.0"}]) || [])
   end
 
   defp releases do

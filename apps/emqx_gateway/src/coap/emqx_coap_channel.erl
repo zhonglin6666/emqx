@@ -41,8 +41,9 @@
 
 -export_type([channel/0]).
 
+-include("emqx_coap.hrl").
 -include_lib("emqx/include/logger.hrl").
--include_lib("emqx_gateway/src/coap/include/emqx_coap.hrl").
+%% -include_lib("emqx_gateway/src/coap/include/emqx_coap.hrl").
 -include_lib("emqx/include/emqx_authentication.hrl").
 
 -define(AUTHN, ?EMQX_AUTHENTICATION_CONFIG_ROOT_NAME_ATOM).
