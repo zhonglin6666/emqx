@@ -27,6 +27,8 @@
 -endif.
 
 post_boot() ->
+    io:format(user, ">>>>>>>>>>>>>>>>>>>> roots ~p~n",
+              [emqx_conf_schema:roots()]),
     ok = ensure_apps_started(),
     _ = emqx_plugins:load(),
     ok = print_vsn(),

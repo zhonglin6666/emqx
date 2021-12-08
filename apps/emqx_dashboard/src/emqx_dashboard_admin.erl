@@ -212,13 +212,16 @@ sha256(SaltBin, Password) ->
     crypto:hash('sha256', <<SaltBin/binary, Password/binary>>).
 
 add_default_user() ->
+    io:format(user, "~n>>>>>>>>>>> add_default_user/0~n", []),
     add_default_user(binenv(default_username), binenv(default_password)).
 
 binenv(Key) ->
     iolist_to_binary(emqx_conf:get([emqx_dashboard, Key], "")).
 
 add_default_user(Username, Password) when ?EMPTY_KEY(Username) orelse ?EMPTY_KEY(Password) ->
-    ok;
+    %% FIXME!!!
+    io:format(user, "~n>>>>>>>>>>> add_default_user empty ~n", []),
+    {ok, empty};
 
 add_default_user(Username, Password) ->
     case lookup_user(Username) of

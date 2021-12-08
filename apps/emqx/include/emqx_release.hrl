@@ -24,4 +24,5 @@
 
 %% NOTE: This version number should be manually bumped for each release
 
--define(EMQX_RELEASE, "5.0-beta.2").
+%% FIXME!!!
+-define(EMQX_RELEASE, "5.0-beta.2-3fdc075b").

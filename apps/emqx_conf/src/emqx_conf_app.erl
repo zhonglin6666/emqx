@@ -25,6 +25,7 @@
 -include("emqx_conf.hrl").
 
 start(_StartType, _StartArgs) ->
+    io:format(user, ">>>>>>>>>>>>>> emqx_conf_app starting <<<<<<<<<<<~n", []),
     init_conf(),
     emqx_conf_sup:start_link().
 

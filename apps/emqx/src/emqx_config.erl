@@ -258,7 +258,9 @@ init_load(SchemaMod, Conf) when is_list(Conf) orelse is_binary(Conf) ->
               true -> fun hocon:binary/2;
               false -> fun hocon:files/2
              end,
-    case Parser(Conf, ParseOptions) of
+    Res = Parser(Conf, ParseOptions),
+    io:format(user, "~n>>>>>>>>>>>>>>>>>> config:init_load parse res ~120p ~n", [Res]),
+    case Res of
         {ok, RawRichConf} ->
             init_load(SchemaMod, RawRichConf);
         {error, Reason} ->
@@ -269,6 +271,8 @@ init_load(SchemaMod, Conf) when is_list(Conf) orelse is_binary(Conf) ->
             error(failed_to_load_hocon_conf)
     end;
 init_load(SchemaMod, RawConf) when is_map(RawConf) ->
+    io:format(user, ">>>>>>>>>> config:init_load is_map ~p ~100p ~n",
+              [SchemaMod, RawConf]),
     ok = save_schema_mod_and_names(SchemaMod),
     %% check configs agains the schema, with environment variables applied on top
     {_AppEnvs, CheckedConf} =
@@ -382,6 +386,8 @@ save_to_app_env(AppEnvs) ->
 
 -spec save_to_config_map(config(), raw_config()) -> ok.
 save_to_config_map(Conf, RawConf) ->
+    io:format(user, ">>>>>>> config:save_to_config_map ~p ~100p ~n",
+              [Conf, RawConf]),
     ?MODULE:put(Conf),
     ?MODULE:put_raw(RawConf).
 

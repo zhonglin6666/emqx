@@ -24,6 +24,18 @@
 
 start(_Type, _Args) ->
     {ok, Sup} = emqx_modules_sup:start_link(),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start sup children ~p~n",
+              [supervisor:which_children(Sup)]),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start get_release ~p~n",
+              [emqx_app:get_release()]),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start official_version ~p~n",
+              [emqx_telemetry:official_version(emqx_app:get_release())]),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start config files ~p~n",
+              [application:get_env(emqx, config_files, [])]),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start retainer config ~p~n",
+              [emqx:get_config([emqx_retainer], undefined)]),
+    io:format(user, "~n>>>>>>>>>>>> modules_app:start authz_api_settings:api_spec ~p~n",
+              [emqx_authz_api_settings:api_spec()]),
     maybe_enable_modules(),
     {ok, Sup}.
 
