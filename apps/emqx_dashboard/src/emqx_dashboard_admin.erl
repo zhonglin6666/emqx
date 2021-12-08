@@ -221,7 +221,8 @@ binenv(Key) ->
 add_default_user(Username, Password) when ?EMPTY_KEY(Username) orelse ?EMPTY_KEY(Password) ->
     %% FIXME!!!
     io:format(user, "~n>>>>>>>>>>> add_default_user empty ~n", []),
-    {ok, empty};
+    %% {ok, empty},
+    ok;
 
 add_default_user(Username, Password) ->
     case lookup_user(Username) of
